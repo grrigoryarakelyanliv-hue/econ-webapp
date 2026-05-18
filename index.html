@@ -55,57 +55,120 @@
 <body>
     <h2>📊 Econ Platform</h2>
     <div class="tabs">
-        <div class="tab active" onclick="showTab('homeworks')">📋 Домашки</div>
-        <div class="tab" onclick="showTab('rating')">⭐ Рейтинг</div>
+        <div class="tab active" onclick="switchTab('homeworks')">📋 Домашки</div>
+        <div class="tab" onclick="switchTab('rating')">⭐ Рейтинг</div>
     </div>
-    <div id="content">
-        <div class="card">
-            <div class="hw-title">📌 Контрольная работа №1</div>
-            <div class="deadline">⏰ Дедлайн: 01.06.2026</div>
-            <div class="leaflet-row">
-                <span>Листочек 1</span>
-                <span class="status done">✅ Сдано</span>
-            </div>
-            <div class="leaflet-row">
-                <span>Листочек 2</span>
-                <span class="status not-done">❌ Не сдано</span>
-            </div>
-            <div class="leaflet-row">
-                <span>Листочек 3</span>
-                <button class="btn">📤 Сдать</button>
-            </div>
-        </div>
-        <div class="card">
-            <div class="hw-title">📌 Домашнее задание №2</div>
-            <div class="deadline">⏰ Дедлайн: 20.05.2026 (прошёл)</div>
-            <div class="leaflet-row">
-                <span>Листочек 4</span>
-                <span class="status done">✅ Сдано</span>
-            </div>
-        </div>
-    </div>
+    <div id="content"><div class="card">Загрузка...</div></div>
 
     <script>
+        // ===== НАСТРОЙКИ =====
+        const API_BASE = "https://ВАШ_ДОМЕН.alwaysdata.net";  // ← замени на свой домен после создания
         const tg = window.Telegram.WebApp;
         tg.ready();
         tg.expand();
+        const userId = tg.initDataUnsafe.user.id;  // Telegram ID пользователя
 
-        function showTab(tab) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            event.target.classList.add('active');
-            if (tab === 'rating') {
-                document.getElementById('content').innerHTML = `
-                    <div class="card">
-                        <h3>⭐ Рейтинг</h3>
-                        <div class="leaflet-row"><span>Листочек 1</span><span>➕➕</span></div>
-                        <div class="leaflet-row"><span>Листочек 2</span><span>➕</span></div>
-                        <div class="leaflet-row"><span>Листочек 3</span><span>➕➕➕</span></div>
-                    </div>
-                `;
-            } else {
-                location.reload();
+        // ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+        async function apiGet(endpoint) {
+            const res = await fetch(`${API_BASE}${endpoint}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return await res.json();
+        }
+
+        async function apiPost(endpoint, body) {
+            const res = await fetch(`${API_BASE}${endpoint}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return await res.json();
+        }
+
+        // ===== ЗАГРУЗКА ДОМАШЕК =====
+        async function loadHomeworks() {
+            try {
+                const data = await apiGet(`/api/student/${userId}/homeworks`);
+                if (!data.length) {
+                    document.getElementById('content').innerHTML = '<div class="card">Нет домашних заданий</div>';
+                    return;
+                }
+                let html = '';
+                const now = new Date();
+                data.forEach(hw => {
+                    const deadline = new Date(hw.deadline);
+                    const deadlinePassed = now > deadline;
+                    html += `<div class="card">
+                        <div class="hw-title">📌 ${hw.title}</div>
+                        <div class="deadline">⏰ Дедлайн: ${deadline.toLocaleDateString()} ${deadlinePassed ? '(прошёл)' : ''}</div>`;
+
+                    hw.leaflets.forEach(lf => {
+                        const statusText = lf.status === 'submitted' ? '✅ На проверке' :
+                                           lf.status === 'returned' ? '↩ Возвращено' : '❌ Не сдано';
+                        const statusClass = (lf.status === 'submitted') ? 'done' : 'not-done';
+                        html += `<div class="leaflet-row">
+                            <span>Листочек ${lf.number}</span>
+                            <span class="status ${statusClass}">${statusText}</span>
+                            ${!deadlinePassed && lf.status === 'not-submitted' ? 
+                                `<button class="btn" onclick="submitLeaflet(${hw.id}, '${lf.number}')">📤 Сдать</button>` : ''}
+                        </div>`;
+                    });
+                    html += `</div>`;
+                });
+                document.getElementById('content').innerHTML = html;
+            } catch (e) {
+                document.getElementById('content').innerHTML = '<div class="card">Ошибка загрузки</div>';
+                console.error(e);
             }
         }
+
+        // ===== ЗАГРУЗКА РЕЙТИНГА =====
+        async function loadRating() {
+            try {
+                const data = await apiGet(`/api/student/${userId}/rating`);
+                let html = '<div class="card"><h3>⭐ Рейтинг</h3>';
+                if (!data.length) html += '<p>Нет данных</p>';
+                else {
+                    data.forEach(r => {
+                        html += `<div class="leaflet-row">
+                            <span>Листочек ${r.leaflet}</span>
+                            <span>${'➕'.repeat(r.points)}</span>
+                        </div>`;
+                    });
+                }
+                html += '</div>';
+                document.getElementById('content').innerHTML = html;
+            } catch (e) {
+                document.getElementById('content').innerHTML = '<div class="card">Ошибка загрузки рейтинга</div>';
+                console.error(e);
+            }
+        }
+
+        // ===== ПЕРЕКЛЮЧЕНИЕ ВКЛАДОК =====
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            if (tab === 'homeworks') loadHomeworks();
+            else if (tab === 'rating') loadRating();
+        }
+
+        // ===== СДАТЬ ЛИСТОЧЕК =====
+        async function submitLeaflet(hwId, leaflet) {
+            try {
+                await apiPost('/api/submit', {
+                    user_id: userId,
+                    homework_id: hwId,
+                    leaflet: leaflet
+                });
+                // Обновляем отображение
+                loadHomeworks();
+            } catch (e) {
+                alert('Ошибка отправки: ' + e.message);
+            }
+        }
+
+        // ===== ПЕРВЫЙ ЗАПУСК =====
+        loadHomeworks();
     </script>
 </body>
 </html>
